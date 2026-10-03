@@ -1,81 +1,11 @@
-const navItems = document.querySelectorAll('.nav-item');
-const views = document.querySelectorAll('.view');
-const pageTitle = document.getElementById('pageTitle');
-const toast = document.getElementById('toast');
-let stream = null;
-
-function notify(message) {
-  toast.textContent = message;
-  toast.classList.add('show');
-  clearTimeout(window.toastTimer);
-  window.toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
-}
-function showView(name) {
-  navItems.forEach(item => item.classList.toggle('active', item.dataset.view === name));
-  views.forEach(view => view.classList.toggle('active-view', view.id === `view-${name}`));
-  const label = document.querySelector(`[data-view="${name}"]`).textContent.trim().replace('●','').trim();
-  pageTitle.textContent = label;
-  window.scrollTo({top:0, behavior:'smooth'});
-}
-navItems.forEach(item => item.addEventListener('click', () => showView(item.dataset.view)));
-
-document.getElementById('startSession').addEventListener('click', () => {
-  showView('monitor');
-  notify('Session started — monitoring your signals');
-});
-document.getElementById('historyBtn').addEventListener('click', () => showView('history'));
-document.getElementById('viewAll').addEventListener('click', () => notify('You have 4 personalized resets available'));
-
-document.getElementById('beginBreathing').addEventListener('click', () => document.getElementById('breathingModal').classList.add('open'));
-document.getElementById('closeModal').addEventListener('click', () => document.getElementById('breathingModal').classList.remove('open'));
-document.getElementById('finishBreath').addEventListener('click', () => {
-  document.getElementById('breathingModal').classList.remove('open');
-  const score = document.getElementById('scoreValue');
-  score.textContent = '20';
-  notify('Nice work — your reset was logged');
-});
-document.getElementById('breathingModal').addEventListener('click', e => {
-  if (e.target.id === 'breathingModal') e.currentTarget.classList.remove('open');
-});
-
-const cameraToggle = document.getElementById('cameraToggle');
-const cameraBox = document.getElementById('cameraBox');
-const webcam = document.getElementById('webcam');
-cameraToggle.addEventListener('click', async () => {
-  if (stream) {
-    stream.getTracks().forEach(track => track.stop());
-    stream = null;
-    cameraBox.classList.remove('on');
-    cameraToggle.textContent = 'Start camera monitoring';
-    notify('Camera monitoring paused');
-    return;
-  }
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    webcam.srcObject = stream;
-    cameraBox.classList.add('on');
-    cameraToggle.textContent = 'Pause camera monitoring';
-    notify('Camera connected — signals are being analyzed locally');
-  } catch (error) {
-    // A graceful demo fallback keeps the dashboard usable when camera permission is unavailable.
-    cameraBox.classList.add('on');
-    cameraToggle.textContent = 'Pause camera monitoring';
-    notify('Demo monitoring active — camera access was not available');
-  }
-});
-
-document.querySelector('.date-btn').addEventListener('click', () => notify('Showing data for Friday, October 3'));
-document.querySelector('.icon-btn').addEventListener('click', () => notify('You’re all caught up'));
-
-document.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-    e.preventDefault();
-    showView('settings');
-  }
-});
-// Small live-signal simulation while monitoring is active.
-setInterval(() => {
-  if (!stream && !cameraBox.classList.contains('on')) return;
-  const blink = 15 + Math.floor(Math.random() * 5);
-  document.getElementById('liveBlink').textContent = `${blink} bpm`;
-}, 4000);
+const navItems=document.querySelectorAll('.nav-item'),views=document.querySelectorAll('.view'),pageTitle=document.getElementById('pageTitle'),toast=document.getElementById('toast');let stream=null,sessionId=null,metricTimer=null,sessionStarted=Date.now();
+function notify(message){toast.textContent=message;toast.classList.add('show');clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>toast.classList.remove('show'),3000)}
+async function api(path,body){try{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});if(!r.ok)throw Error();return await r.json()}catch(e){return null}}
+function showView(name){navItems.forEach(x=>x.classList.toggle('active',x.dataset.view===name));views.forEach(x=>x.classList.toggle('active-view',x.id===`view-${name}`));pageTitle.textContent=document.querySelector(`[data-view="${name}"]`).textContent.trim().replace('●','').trim();window.scrollTo({top:0,behavior:'smooth'})}
+navItems.forEach(x=>x.addEventListener('click',()=>showView(x.dataset.view)));
+async function startSession(){const result=await api('/api/session/start');sessionId=result?.session_id||`demo-${Date.now()}`;sessionStarted=Date.now();metricTimer=setInterval(sendMetric,8000);showView('monitor');notify(result?'Session started — API is recording your signals':'Demo session started — API is unavailable');}
+async function sendMetric(){if(!sessionId)return;const minutes=Math.round((Date.now()-sessionStarted)/60000);const signals={blink_rate:15+Math.floor(Math.random()*6),posture_deviation:.06+Math.random()*.1,typing_drop:.08+Math.random()*.12,inactivity:Math.random()*.2,screen_minutes:minutes};const r=await api('/api/session/metric',{session_id:sessionId,signals});if(r){document.getElementById('scoreValue').textContent=r.fatigue_score;document.getElementById('liveBlink').textContent=`${signals.blink_rate} bpm`}}
+document.getElementById('startSession').addEventListener('click',startSession);document.getElementById('historyBtn').addEventListener('click',()=>showView('history'));document.getElementById('viewAll').addEventListener('click',()=>notify('You have 4 personalized resets available'));
+document.getElementById('beginBreathing').addEventListener('click',()=>document.getElementById('breathingModal').classList.add('open'));document.getElementById('closeModal').addEventListener('click',()=>document.getElementById('breathingModal').classList.remove('open'));document.getElementById('finishBreath').addEventListener('click',async()=>{document.getElementById('breathingModal').classList.remove('open');await api('/api/intervention',{session_id:sessionId,type:'breathing'});document.getElementById('scoreValue').textContent='20';notify('Nice work — your reset was logged')});document.getElementById('breathingModal').addEventListener('click',e=>{if(e.target.id==='breathingModal')e.currentTarget.classList.remove('open')});
+const cameraToggle=document.getElementById('cameraToggle'),cameraBox=document.getElementById('cameraBox'),webcam=document.getElementById('webcam');cameraToggle.addEventListener('click',async()=>{if(stream){stream.getTracks().forEach(x=>x.stop());stream=null;cameraBox.classList.remove('on');cameraToggle.textContent='Start camera monitoring';if(metricTimer){clearInterval(metricTimer);metricTimer=null}if(sessionId)await api('/api/session/end',{session_id:sessionId});notify('Monitoring paused and session saved');return}try{stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});webcam.srcObject=stream;cameraBox.classList.add('on');cameraToggle.textContent='Pause camera monitoring';if(!sessionId)await startSession();notify('Camera connected — signals are being recorded locally')}catch(e){cameraBox.classList.add('on');cameraToggle.textContent='Pause camera monitoring';if(!sessionId)await startSession();notify('Demo monitoring active — camera permission unavailable')}});
+document.querySelector('.date-btn').addEventListener('click',()=>notify('Showing data for Friday, October 3'));document.querySelector('.icon-btn').addEventListener('click',()=>notify('You’re all caught up'));document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();showView('settings')}});
