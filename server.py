@@ -4,6 +4,11 @@ from urllib.parse import urlparse
 from pathlib import Path
 from datetime import datetime, timezone
 import json, math, random, threading, uuid, base64
+try:
+    from ai_engine import FatigueEngine
+    AI = FatigueEngine()
+except Exception as exc:
+    AI = None
 
 ROOT = Path(__file__).parent
 DATA = ROOT / "data"
@@ -54,8 +59,16 @@ class Handler(SimpleHTTPRequestHandler):
             with lock:
                 sessions=read_sessions(); sessions.append(session); save_sessions(sessions)
             return self.end_json(201, {'session_id':sid,'started_at':now})
+        if path == '/api/frame':
+            if not AI: return self.end_json(503, {'available':False,'reason':'AI engine unavailable; install requirements.txt'})
+            result=AI.analyze(payload.get('image',''))
+            sid=payload.get('session_id')
+            if sid and result.get('available') and result.get('face_detected'):
+                signals={'blink_rate':17,'posture_deviation':result.get('posture_deviation',0.1),'typing_drop':0.1,'inactivity':0.1,'screen_minutes':0}
+                result['fatigue_score']=fatigue_score(signals) if 'fatigue_score' not in result else result['fatigue_score']
+            return self.end_json(200,result)
         if path == '/api/session/metric':
-            sid=payload.get('session_id'); signals=payload.get('signals',payload); score=fatigue_score(signals)
+            sid=payload.get('session_id'); signals=payload.get('signals',payload); score=payload.get('fatigue_score',fatigue_score(signals))
             with lock:
                 sessions=read_sessions(); item=next((x for x in sessions if x['id']==sid),None)
                 if not item: return self.end_json(404, {'error':'Session not found'})
